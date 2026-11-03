@@ -37,7 +37,26 @@ Without a key the app still runs: a scan tells you how to add one, and the **Try
 | 6 | Ask Nomi chat: answers only from the scanned products' label text, and otherwise sends you to a pharmacist. | `app/api/ask` |
 | 7 | Dose timer: label directions (`dosage_and_administration`) parsed into min hours between doses and max per 24h. Grok extracts the numbers, and code checks that each number appears in the label text. Built-in rules are the fallback. The scheduling math is plain code. | `lib/dosing.ts`, `lib/schedule.ts` |
 
-API routes: `/api/scan` (main), `/api/recalls`, `/api/ask`, `/api/dosing`, `/api/schedule`. No database. Dose logs
+### Live mode
+
+Tap **Live** at the top for a FaceTime-style scan. The camera (rear camera on phones) sends a downscaled frame (768px
+max) to `/api/live-frame` every 2.5 seconds, but only when the previous frame has finished. Products build up in "Seen
+so far", deduped like multi-photo. The same openFDA and deterministic checks rerun each time, and the status bar turns
+red, yellow or green as you go.
+
+- **Voice warnings:** when a new flag appears, Nomi says it out loud with the browser's `speechSynthesis`, in 20 words
+  or less built from the flag itself ("Warning. Tylenol and NyQuil both contain acetaminophen..."). There's a Mute button.
+- **Voice questions:** tap **Ask Nomi**, speak, and tap again. It uses Web Speech `SpeechRecognition` and sends the
+  question to `/api/ask` (grounded in the seen products' FDA labels). The answer is spoken and shown as captions.
+  Where speech recognition isn't supported (Firefox, some Safari setups), a text box replaces the mic.
+- **Demo without camera:** simulates Tylenol at about 2.5s and NyQuil at about 5s, so the red warning fires about
+  6 seconds in. It works with no camera and no key.
+
+**Camera access needs localhost or HTTPS.** A phone opening `http://<laptop-ip>:3000` over the LAN will not get the
+camera. Demo on the laptop itself, or tunnel with `ngrok http 3000` (use the https URL on the phone), or run
+`npx next dev --experimental-https`. Voice recognition works best in Chrome.
+
+API routes: `/api/scan` (main), `/api/live-frame`, `/api/recalls`, `/api/ask`, `/api/dosing`, `/api/schedule`. No database. Dose logs
 stay in the browser's localStorage.
 
 ### MOCK mode
@@ -67,7 +86,10 @@ curl -s -X POST "localhost:3000/api/scan?mock=1" | jq '.status, .flags[].title'
    the live FDA recall notices with source links (Grok web search adds alerts when the key is on).
 5. **Ask Nomi.** Tap "Can I drink alcohol with these?" and it answers from the label. Then ask something off-label
    ("what's the best antibiotic?"). It declines and says to ask a pharmacist.
-6. **Dose timer.** Log "took Tylenol at 8:00". The acetaminophen bar drops to 3,000 mg left and NyQuil shows its next
+6. **Live mode (optional wow moment).** Switch to **Live**, tap **Start camera**, and hold up Tylenol, then NyQuil.
+   The bar flips red and Nomi says the warning out loud. Tap **Ask Nomi** and say "Can I drink alcohol with these?"
+   (No camera or network? Use **Demo without camera**.)
+7. **Dose timer.** Log "took Tylenol at 8:00". The acetaminophen bar drops to 3,000 mg left and NyQuil shows its next
    safe time. Paste a schedule (`1:00-2:15pm CS 2110`, `5pm-6:30pm gym`) or upload a .ics, and the green dots move out
    of class: "Take after CS 2110". Close on "Follow the label; ask a pharmacist."
 

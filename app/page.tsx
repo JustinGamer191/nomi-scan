@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import AskNomi from "@/components/AskNomi";
 import DosePlanner from "@/components/DosePlanner";
+import LiveMode from "@/components/LiveMode";
 import type { DosingResult } from "@/lib/dosing";
 import type { RecallReport } from "@/lib/recalls";
 import type { Flag, LabelInfo, ScanResult } from "@/lib/types";
@@ -49,6 +50,7 @@ const STATUS = {
 } as const;
 
 export default function Home() {
+  const [mode, setMode] = useState<"upload" | "live">("upload");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [scanError, setScanError] = useState<{ message: string; hints: string[] } | null>(null);
   const [drag, setDrag] = useState(false);
@@ -149,7 +151,22 @@ export default function Home() {
             Grok vision + openFDA
           </span>
         </div>
-        <h1 className="mt-6 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+        <div role="tablist" aria-label="Mode" className="mt-6 inline-flex rounded-xl border border-stone-200 bg-white p-1">
+          {(["upload", "live"] as const).map((m) => (
+            <button
+              key={m}
+              role="tab"
+              aria-selected={mode === m}
+              onClick={() => setMode(m)}
+              className={`rounded-lg px-4 py-1.5 text-sm font-medium ${
+                mode === m ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-900"
+              }`}
+            >
+              {m === "upload" ? "Upload" : "Live"}
+            </button>
+          ))}
+        </div>
+        <h1 className="mt-5 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
           Snap your meds. Catch the overlap.
         </h1>
         <p className="mt-2 max-w-xl text-stone-600">
@@ -159,6 +176,10 @@ export default function Home() {
       </header>
 
       <main className="mx-auto mt-6 max-w-3xl space-y-6 px-4">
+        {mode === "live" ? (
+          <LiveMode />
+        ) : (
+          <>
         <section
           onDragOver={(e) => {
             e.preventDefault();
@@ -338,6 +359,8 @@ export default function Home() {
             <AskNomi key={result.products.map((p) => p.brand).join("|")} result={result} />
             {dosing === "loading" && <p className="text-sm text-stone-500">Reading dosing directions from FDA labels...</p>}
             {dosing && dosing !== "loading" && <DosePlanner dosing={dosing} mock={result.mock} />}
+          </>
+        )}
           </>
         )}
       </main>
