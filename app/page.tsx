@@ -2,15 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AgePicker from "@/components/AgePicker";
-import AskNomi from "@/components/AskNomi";
-import DosePlanner from "@/components/DosePlanner";
 import LiveMode from "@/components/LiveMode";
-import ScanSummary from "@/components/ScanSummary";
-import { ageGroup, DEFAULT_AGE, isUnder12, type AgeGroupId } from "@/lib/ages";
-import type { DosingResult } from "@/lib/dosing";
-import type { RecallReport } from "@/lib/recalls";
-import { singleProductHeadline } from "@/lib/statusText";
-import type { Flag, LabelInfo, ScanResult } from "@/lib/types";
+import ResultsPanel from "@/components/ResultsPanel";
+import { ageGroup, DEFAULT_AGE, type AgeGroupId } from "@/lib/ages";
+import type { ScanResult } from "@/lib/types";
 
 // Downscale big phone photos before upload (faster, cheaper, still readable).
 async function shrink(file: File, max = 1800): Promise<Blob> {
@@ -33,27 +28,6 @@ const AGE_KEY = "nomi-age";
 
 type Photo = { id: string; file: File; url: string };
 
-const STATUS = {
-  red: {
-    label: "Do not combine without asking",
-    sub: "We found a serious overlap between these products.",
-    ring: "bg-red-50 border-red-200 text-red-900",
-    dot: "bg-red-500",
-  },
-  yellow: {
-    label: "Use caution",
-    sub: "Some overlap or uncertainty. Check with a pharmacist.",
-    ring: "bg-amber-50 border-amber-200 text-amber-900",
-    dot: "bg-amber-500",
-  },
-  green: {
-    label: "No overlaps found",
-    sub: "No duplicate ingredients or known OTC conflicts in our checks.",
-    ring: "bg-emerald-50 border-emerald-200 text-emerald-900",
-    dot: "bg-emerald-500",
-  },
-} as const;
-
 export default function Home() {
   const [mode, setMode] = useState<"upload" | "live">("upload");
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -63,8 +37,6 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [scannedAt, setScannedAt] = useState("");
-  const [recalls, setRecalls] = useState<Record<string, RecallReport> | "loading" | null>(null);
-  const [dosing, setDosing] = useState<DosingResult | "loading" | null>(null);
   const pickRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
   const [age, setAge] = useState<AgeGroupId>(DEFAULT_AGE);
@@ -121,8 +93,6 @@ export default function Home() {
     setError(null);
     setScanError(null);
     setResult(null);
-    setRecalls(null);
-    setDosing(null);
     try {
       const body = new FormData();
       body.append("age", forAge);
@@ -139,7 +109,6 @@ export default function Home() {
       const scanned = data as ScanResult;
       setScannedAt(new Date().toISOString());
       setResult(scanned);
-      loadExtras(scanned);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scan failed");
     } finally {
@@ -147,28 +116,6 @@ export default function Home() {
     }
   }
 
-  // Follow-up calls after the scan: live recall check and label dosing rules.
-  function loadExtras(scanned: ScanResult) {
-    const body = JSON.stringify({ products: scanned.products, mock: scanned.mock });
-    const opts = { method: "POST", headers: { "Content-Type": "application/json" }, body };
-    setRecalls("loading");
-    // The dose timer schedules adult directions; kids follow the box's dosing chart.
-    const timer = !isUnder12(ageGroup(scanned.age));
-    setDosing(timer ? "loading" : null);
-    fetch("/api/recalls", opts)
-      .then((r) => r.json())
-      .then((d: { reports?: RecallReport[] }) =>
-        setRecalls(Object.fromEntries((d.reports ?? []).map((r) => [r.brand, r]))),
-      )
-      .catch(() => setRecalls({}));
-    if (timer)
-      fetch("/api/dosing", opts)
-      .then((r) => r.json())
-      .then((d: DosingResult) => setDosing(d.rules ? d : null))
-      .catch(() => setDosing(null));
-  }
-
-  const flaggedKeys = new Set(result?.flags.flatMap((f) => f.ingredients) ?? []);
 
   return (
     <div className="min-h-dvh bg-stone-50 pb-24 text-stone-900">
@@ -385,11 +332,7 @@ export default function Home() {
 
         {result && (
           <>
-            <Results result={result} flaggedKeys={flaggedKeys} recalls={recalls} />
-            <ScanSummary key={scannedAt} result={result} scannedAt={scannedAt} />
-            <AskNomi key={`${result.age}|${result.products.map((p) => p.brand).join("|")}`} result={result} />
-            {dosing === "loading" && <p className="text-sm text-stone-500">Reading dosing directions from FDA labels...</p>}
-            {dosing && dosing !== "loading" && <DosePlanner dosing={dosing} mock={result.mock} />}
+            <ResultsPanel result={result} scannedAt={scannedAt} />
           </>
         )}
           </>
@@ -402,170 +345,5 @@ export default function Home() {
         </p>
       </footer>
     </div>
-  );
-}
-
-function RecallBadge({ report }: { report: RecallReport | "loading" | undefined }) {
-  if (report === "loading") return <p className="mt-3 text-xs text-stone-400">Checking recalls...</p>;
-  if (!report) return null;
-  const n = report.items.length;
-  return (
-    <div className="mt-3">
-      {n === 0 ? (
-        <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200">
-          No recent recalls found
-        </span>
-      ) : (
-        <details>
-          <summary className="inline-flex cursor-pointer list-none rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-300">
-            {n} recall notice{n > 1 ? "s" : ""} mention this brand
-          </summary>
-          <ul className="mt-2 space-y-2">
-            {report.items.map((it, i) => (
-              <li key={i} className="rounded-lg bg-amber-50 p-2 text-xs text-amber-950">
-                <p className="font-medium">
-                  {it.title}
-                  {it.date && <span className="font-normal text-amber-800"> · {it.date}</span>}
-                </p>
-                {it.detail && <p className="mt-0.5 text-amber-900/80">{it.detail}</p>}
-                <a href={it.url} target="_blank" rel="noreferrer" className="mt-0.5 inline-block break-all text-amber-900 underline">
-                  Source ({it.source})
-                </a>
-              </li>
-            ))}
-            <li className="text-[11px] text-stone-500">Check the lot number on your box against the notice.</li>
-          </ul>
-        </details>
-      )}
-      {report.note && <p className="mt-1 text-[11px] text-stone-400">{report.note}</p>}
-    </div>
-  );
-}
-
-function Results({
-  result,
-  flaggedKeys,
-  recalls,
-}: {
-  result: ScanResult;
-  flaggedKeys: Set<string>;
-  recalls: Record<string, RecallReport> | "loading" | null;
-}) {
-  const s = STATUS[result.status];
-  const profile = ageGroup(result.age);
-  const single = singleProductHeadline(result.flags);
-  const ageOnlyRed =
-    !single &&
-    result.status === "red" && !result.flags.some((f) => f.severity === "red" && f.kind !== "age");
-  return (
-    <div className="space-y-6">
-      <section className={`rounded-2xl border p-5 ${s.ring}`} data-status={result.status}>
-        <div className="flex items-center gap-3">
-          <span className={`h-4 w-4 shrink-0 rounded-full ${s.dot}`} />
-          <h2 className="text-xl font-semibold">{single ? single.title : ageOnlyRed ? "Not for this age without asking" : s.label}</h2>
-          <span className="ml-auto text-xs uppercase tracking-wide opacity-70">{result.status}</span>
-        </div>
-        <p className="mt-1 pl-7 text-sm opacity-80">
-          {single ? single.sub : ageOnlyRed ? "A label warning applies to this age group." : s.sub} Checked for: {profile.label}.
-        </p>
-      </section>
-
-      {result.flags.length > 0 && (
-        <section className="space-y-3">
-          <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">What we found</h3>
-          {result.flags.map((f) => (
-            <FlagCard key={f.id} flag={f} />
-          ))}
-        </section>
-      )}
-
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
-          Your meds ({result.products.length})
-        </h3>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {result.products.map((p, i) => (
-            <article key={i} className="rounded-2xl border border-stone-200 bg-white p-4">
-              <div className="flex items-start justify-between gap-2">
-                <h4 className="font-semibold leading-snug">
-                  {p.brand}
-                  {p.rx && <span className="ml-2 inline-block rounded-md bg-indigo-600 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">Rx</span>}
-                </h4>
-                <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
-                  {Math.round(p.confidence * 100)}% sure
-                </span>
-              </div>
-              {p.rx && p.directions && <p className="mt-1 text-xs text-stone-600">Bottle: {p.directions}</p>}
-              {result.image_count > 1 && p.images && p.images.length > 0 && (
-                <p className="mt-0.5 text-xs text-stone-400">
-                  Seen in photo{p.images.length > 1 ? "s" : ""} {p.images.join(", ")}
-                </p>
-              )}
-              <ul className="mt-3 space-y-2">
-                {p.active_ingredients.map((a, j) => {
-                  const key = p.keys[j];
-                  const label: LabelInfo | undefined = result.labels[key];
-                  const hot = flaggedKeys.has(key);
-                  return (
-                    <li
-                      key={j}
-                      className={`rounded-lg px-3 py-2 text-sm ${
-                        hot ? "bg-red-50 text-red-900 ring-1 ring-red-200" : "bg-stone-50"
-                      }`}
-                    >
-                      <div className="flex justify-between gap-2">
-                        <span className="font-medium">{a.name}</span>
-                        <span className="text-stone-500">{a.strength}</span>
-                      </div>
-                      <div className="mt-0.5 text-xs text-stone-500">
-                        {label?.found ? `FDA label: ${label.label_name}` : "No label found"}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
-              {recalls && <RecallBadge report={recalls === "loading" ? "loading" : recalls[p.brand]} />}
-            </article>
-          ))}
-        </div>
-      </section>
-
-      {result.notes.length > 0 && (
-        <ul className="space-y-1 text-xs text-stone-500">
-          {result.notes.map((n, i) => (
-            <li key={i}>{n}</li>
-          ))}
-        </ul>
-      )}
-      <p className="text-xs text-stone-400">Model: {result.model}. Labels from api.fda.gov.</p>
-    </div>
-  );
-}
-
-function FlagCard({ flag }: { flag: Flag }) {
-  const red = flag.severity === "red";
-  return (
-    <article className={`rounded-2xl border bg-white p-4 ${red ? "border-red-200" : "border-amber-200"}`}>
-      <div className="flex items-center gap-2">
-        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${red ? "bg-red-500" : "bg-amber-500"}`} />
-        <h4 className="font-semibold">{flag.title}</h4>
-        {flag.kind === "age" && (
-          <span className="ml-auto shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600">Age check</span>
-        )}
-      </div>
-      <p className="mt-1 text-xs text-stone-500">In: {flag.products.join(" + ")}</p>
-      {flag.rx && (
-        <p className="mt-3 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-950">
-          Talk to your pharmacist or prescriber before combining. Do not stop a prescription on your own.
-        </p>
-      )}
-      {flag.explanation && <p className="mt-3 text-[15px] leading-relaxed text-stone-800">{flag.explanation}</p>}
-      <div className="mt-3 space-y-1 text-xs text-stone-500">
-        {flag.citations?.map((c, i) => (
-          <p key={i}>Source: {c}</p>
-        ))}
-        <p>Rule: {flag.source}</p>
-      </div>
-    </article>
   );
 }

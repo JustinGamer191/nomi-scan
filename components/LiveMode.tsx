@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ResultsPanel from "@/components/ResultsPanel";
 import type { AgeGroupId } from "@/lib/ages";
 import type { SeenProduct } from "@/lib/pipeline";
 import { singleProductHeadline } from "@/lib/statusText";
-import type { Flag } from "@/lib/types";
+import type { Flag, LabelInfo, ScanResult } from "@/lib/types";
 
 type Status = "red" | "yellow" | "green";
 
@@ -13,6 +14,7 @@ type FrameResponse = {
   products: SeenProduct[];
   flags: Flag[];
   status: Status;
+  labels: Record<string, LabelInfo>;
   added: string[];
   hint: string | null;
   error?: string;
@@ -75,6 +77,9 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
   const [products, setProducts] = useState<SeenProduct[]>([]);
   const [flags, setFlags] = useState<Flag[]>([]);
   const [status, setStatus] = useState<Status>("green");
+  const [labels, setLabels] = useState<Record<string, LabelInfo>>({});
+  const [sessionAt, setSessionAt] = useState(() => new Date().toISOString());
+  const [mockData, setMockData] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [muted, setMuted] = useState(false);
@@ -216,6 +221,8 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
       seenRef.current = data.products;
       setProducts(data.products);
       setFlags(data.flags);
+      setLabels(data.labels ?? {});
+      setMockData(!!data.mock);
       setStatus(data.status);
       setHint(data.hint);
       for (const f of data.flags) {
@@ -249,6 +256,8 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
     tick.current = 0;
     setProducts([]);
     setFlags([]);
+    setLabels({});
+    setSessionAt(new Date().toISOString());
     setStatus("green");
     setHint(null);
     setCaption(null);
@@ -410,6 +419,27 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
     rec.start();
   }
 
+  // The accumulated "Seen so far" list as a ScanResult, so Live renders the same
+  // result panels as Upload (flags, recalls, summary, Ask Nomi, dose planner).
+  const liveResult = useMemo<ScanResult | null>(
+    () =>
+      products.length
+        ? {
+            mock: mockData || running === "demo",
+            age,
+            model: "live",
+            status,
+            products,
+            image_count: 0,
+            hints: hint ? [`Last frame: ${hint}`] : [],
+            labels,
+            flags,
+            notes: ["Live mode session: products accumulated from the camera."],
+          }
+        : null,
+    [products, flags, labels, status, age, hint, mockData, running],
+  );
+
   const s = STATUS_STYLE[status];
 
   return (
@@ -540,32 +570,6 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
         </form>
       )}
 
-      {/* Flags */}
-      {flags.length > 0 && (
-        <section className="space-y-2">
-          {flags.map((f) => (
-            <article key={f.id} className={`rounded-2xl border bg-white p-4 ${f.severity === "red" ? "border-red-300" : "border-amber-300"}`}>
-              <div className="flex items-center gap-2">
-                <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${f.severity === "red" ? "bg-red-500" : "bg-amber-500"}`} />
-                <h4 className="font-semibold">{f.title}</h4>
-              </div>
-              <p className="mt-1 text-xs text-stone-500">In: {f.products.join(" + ")}</p>
-      {f.rx && (
-        <p className="mt-3 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-950">
-          Talk to your pharmacist or prescriber before combining. Do not stop a prescription on your own.
-        </p>
-      )}
-              {f.explanation && <p className="mt-2 text-[15px] leading-relaxed text-stone-800">{f.explanation}</p>}
-              {f.citations?.map((c, i) => (
-                <p key={i} className="mt-1 text-xs text-stone-500">
-                  Source: {c}
-                </p>
-              ))}
-            </article>
-          ))}
-        </section>
-      )}
-
       {/* Seen so far */}
       <section className="space-y-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">Seen so far ({products.length})</h3>
@@ -595,6 +599,8 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
           </button>
         )}
       </section>
+
+      {liveResult && <ResultsPanel result={liveResult} scannedAt={sessionAt} debounceMs={1500} explain />}
     </div>
   );
 }

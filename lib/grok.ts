@@ -227,7 +227,10 @@ export async function explainFlags(
   const issues = flags
     .map((f) => {
       const texts = f.evidence?.length
-        ? f.evidence.map((e) => `SOURCE: openFDA label "${e.label}" (${e.section})\nQUOTE: ${e.quote}`)
+        ? f.evidence.map(
+            (e) =>
+              `SOURCE: openFDA label "${e.label}" (${e.section})\nQUOTE: ${e.quote}\nMATCH: our code matched ${f.ingredients.join(", ")} (in ${f.products.slice(1).join(", ") || "the other product"}) to this sentence by name or drug class (e.g. ibuprofen is an NSAID, sertraline is an SSRI).`,
+          )
         : f.ingredients.map((i) => labelExcerpt(labels[i] ?? { ingredient: i, found: false }));
       return `ISSUE id=${f.id}\nproblem: ${f.title}\nproducts: ${f.products.join(", ")}\nrule source: ${f.source}\nLABEL TEXT:\n${texts.join("\n---\n")}`;
     })
@@ -241,7 +244,10 @@ export async function explainFlags(
     const parsed = extractJson(out) as { explanations?: { id: string; explanation: string; citations?: string[] }[] };
     if (!parsed?.explanations || !Array.isArray(parsed.explanations)) throw new Error("bad shape");
     return Object.fromEntries(
-      parsed.explanations.map((e) => [e.id, { explanation: String(e.explanation), citations: (e.citations ?? []).map(String) }]),
+      parsed.explanations
+        // An evidence-backed flag answered with "not addressed" falls back to the quote template.
+        .filter((e) => !(flags.find((f) => f.id === e.id)?.evidence?.length && /does not address|not address/i.test(String(e.explanation))))
+        .map((e) => [e.id, { explanation: String(e.explanation), citations: (e.citations ?? []).map(String) }]),
     );
   };
   try {

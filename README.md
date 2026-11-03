@@ -58,6 +58,12 @@ red, yellow or green as you go.
 - **Demo without camera:** simulates Tylenol at about 2.5s and NyQuil at about 5s, so the red warning fires about
   6 seconds in. It works with no camera and no key.
 
+- **Same results as Upload:** under the video, Live mode renders the shared `components/ResultsPanel.tsx`. That
+  covers flag cards with Grok explanations and citations, recall badges, Rx and boxed-warning cards, age checks,
+  the pharmacist summary (copy, .txt download, preview), Ask Nomi and the dose planner, all driven by the "Seen so far"
+  list. Explanations (`/api/explain`), recalls and dosing run about 1.5s after the list stops changing and are cached
+  per product, so a new box doesn't spam Grok.
+
 **Camera access needs localhost or HTTPS.** A phone opening `http://<laptop-ip>:3000` over the LAN will not get the
 camera. Demo on the laptop itself, or tunnel with `ngrok http 3000` (use the https URL on the phone), or run
 `npx next dev --experimental-https`. Voice recognition works best in Chrome.
