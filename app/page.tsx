@@ -5,6 +5,7 @@ import AgePicker from "@/components/AgePicker";
 import AskNomi from "@/components/AskNomi";
 import DosePlanner from "@/components/DosePlanner";
 import LiveMode from "@/components/LiveMode";
+import ScanSummary from "@/components/ScanSummary";
 import { ageGroup, DEFAULT_AGE, isUnder12, type AgeGroupId } from "@/lib/ages";
 import type { DosingResult } from "@/lib/dosing";
 import type { RecallReport } from "@/lib/recalls";
@@ -60,6 +61,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [scannedAt, setScannedAt] = useState("");
   const [recalls, setRecalls] = useState<Record<string, RecallReport> | "loading" | null>(null);
   const [dosing, setDosing] = useState<DosingResult | "loading" | null>(null);
   const pickRef = useRef<HTMLInputElement>(null);
@@ -134,6 +136,7 @@ export default function Home() {
         return;
       }
       const scanned = data as ScanResult;
+      setScannedAt(new Date().toISOString());
       setResult(scanned);
       loadExtras(scanned);
     } catch (e) {
@@ -382,6 +385,7 @@ export default function Home() {
         {result && (
           <>
             <Results result={result} flaggedKeys={flaggedKeys} recalls={recalls} />
+            <ScanSummary key={scannedAt} result={result} scannedAt={scannedAt} />
             <AskNomi key={`${result.age}|${result.products.map((p) => p.brand).join("|")}`} result={result} />
             {dosing === "loading" && <p className="text-sm text-stone-500">Reading dosing directions from FDA labels...</p>}
             {dosing && dosing !== "loading" && <DosePlanner dosing={dosing} mock={result.mock} />}

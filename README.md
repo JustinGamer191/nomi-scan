@@ -120,3 +120,11 @@ curl -s -X POST "localhost:3000/api/scan?mock=1" | jq '.status, .flags[].title'
 - Explanations and chat answers are grounded in openFDA text fetched on the server, not text sent by the client.
 - Dose numbers parsed by Grok are rejected unless they literally appear in the label directions.
 - The UI always shows: "Not medical advice. Ask a pharmacist."
+
+## Pharmacist discussion summary
+
+After an Upload scan (including **Try demo**), use **Preview summary**, **Copy summary**, or **Download .txt** to take the results to a pharmacist. The text includes the scan timestamp, selected age group, detected products and strengths, warnings and citations, photo issues, and openFDA label links. Demo summaries are clearly marked. A result with no flags is not presented as proof of safety.
+
+The summary is generated in the browser and includes no photos, chat answers, recall results, or dose logs. Review the preview before sharing; it contains medicine information and your selected age group. If clipboard access is unavailable, copy from the preview or download the text file.
+
+Run `npm test` for summary export checks, `npm run lint` for linting, and `npm run build` for the production build.
