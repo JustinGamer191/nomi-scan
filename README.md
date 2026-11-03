@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nomi Scan
 
-## Getting Started
+Snap up to 6 photos of your OTC meds (up to 5 products). Grok reads the boxes, openFDA supplies the label warnings, and plain code flags the
+dangerous overlaps (like acetaminophen in both Tylenol and NyQuil).
 
-First, run the development server:
+**Not medical advice. Ask a pharmacist.**
+
+## Setup (3 commands)
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd ~/Projects/nomi-scan
+npm install
+MOCK=1 npm run dev        # demo with no key; drop MOCK=1 once your key is in
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. On a phone on the same Wi-Fi, use the Network URL that `next dev` prints.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Add your xAI key
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+1. Create a key at https://console.x.ai
+2. `cp .env.local.example .env.local` and paste it after `XAI_API_KEY=`
+3. Restart `npm run dev`
 
-## Learn More
+Optional: `XAI_MODEL=...` overrides the model (default `grok-4.7`, the model used in docs.x.ai's image-understanding guide).
 
-To learn more about Next.js, take a look at the following resources:
+Without a key the app still runs: a scan tells you how to add one, and the **Try demo** button always works (`?mock=1`).
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## How it works
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+| Step | What | Where |
+| --- | --- | --- |
+| 1 | Grok vision reads each photo (parallel calls, one per image) into strict JSON `{products:[{brand, active_ingredients:[{name, strength}], confidence}], unreadable}`. If the JSON is bad, it retries once with a stricter prompt. Products seen in several photos (same brand + same ingredients) are merged. A box Grok can see but not read becomes a hint like "Image 2: labels too small to read, try a closer photo". | `lib/grok.ts`, `app/api/scan` |
+| 2 | openFDA drug label per ingredient (`warnings`, `do_not_use`, `ask_doctor`, `stop_use`). A 404 shows "No label found". | `lib/fda.ts` |
+| 3 | **Deterministic checks, no LLM**: the same ingredient in two products (red), plus a hardcoded list of OTC class pairs with sources (two NSAIDs = red; two sedating antihistamines or two decongestants = yellow). | `lib/checks.ts` |
+| 4 | A second Grok call explains each flag using ONLY the label text we pass it, and cites the label. | `lib/grok.ts` |
+| 5 | Recall check: live openFDA recall reports plus Grok web search (Responses API `web_search` tool) with source links. Without search it falls back to openFDA only. | `lib/recalls.ts` |
+| 6 | Ask Nomi chat: answers only from the scanned products' label text, and otherwise sends you to a pharmacist. | `app/api/ask` |
+| 7 | Dose timer: label directions (`dosage_and_administration`) parsed into min hours between doses and max per 24h. Grok extracts the numbers, and code checks that each number appears in the label text. Built-in rules are the fallback. The scheduling math is plain code. | `lib/dosing.ts`, `lib/schedule.ts` |
 
-## Deploy on Vercel
+API routes: `/api/scan` (main), `/api/recalls`, `/api/ask`, `/api/dosing`, `/api/schedule`. No database. Dose logs
+stay in the browser's localStorage.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### MOCK mode
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`MOCK=1` (env) or `?mock=1` returns canned Grok output for **Tylenol Extra Strength + Vicks NyQuil Cold & Flu**. The
+openFDA calls stay live. Other scenarios: `?mock=nsaids` (Advil + Aleve, red), `?mock=green` (Tylenol + Claritin),
+`?mock=nolabel` (unknown ingredient, yellow). Uploading 2+ photos in MOCK mode puts Tylenol in photo 1 and NyQuil + Tylenol
+in photo 2 (to show the merge), and any photo after that returns the "labels too small" hint.
+
+```bash
+curl -s -X POST "localhost:3000/api/scan?mock=1" | jq '.status, .flags[].title'
+# "red"
+# "Duplicate ingredient: acetaminophen"
+```
+
+## Demo script (about 2 minutes)
+
+1. **Hook.** "Tylenol and NyQuil are on every dorm shelf. Most people don't know they both contain acetaminophen."
+2. **Scan.** Hold up a real Tylenol Extra Strength box and a NyQuil Cold & Flu box. Take one photo of both on your phone
+   with **Take photo** (or one photo each with **Take another photo**), or drop the photos on the laptop, then tap
+   **Scan**. (If the wifi or the key fails, tap
+   **Try demo**.)
+3. **Red warning.** The banner turns red: "Duplicate ingredient: acetaminophen". Read the explanation out loud. It
+   quotes the FDA label ("Severe liver damage may occur if you take more than 4,000 mg...") and cites which label it
+   came from.
+4. **Med cards.** Point at the acetaminophen rows highlighted in both cards, then the recall badge. Expand it to show
+   the live FDA recall notices with source links (Grok web search adds alerts when the key is on).
+5. **Ask Nomi.** Tap "Can I drink alcohol with these?" and it answers from the label. Then ask something off-label
+   ("what's the best antibiotic?"). It declines and says to ask a pharmacist.
+6. **Dose timer.** Log "took Tylenol at 8:00". The acetaminophen bar drops to 3,000 mg left and NyQuil shows its next
+   safe time. Paste a schedule (`1:00-2:15pm CS 2110`, `5pm-6:30pm gym`) or upload a .ics, and the green dots move out
+   of class: "Take after CS 2110". Close on "Follow the label; ask a pharmacist."
+
+## 60-second pitch
+
+> Acetaminophen overdose is the leading cause of acute liver failure in the US, and much of it is accidental: people
+> take Tylenol for a headache and NyQuil for a cold without realizing both contain the same drug. The warning is on
+> the box, in tiny type, on the back.
+>
+> Nomi Scan turns that into one photo. Grok's vision model reads every box in the shot. We pull the official FDA
+> label for each ingredient from openFDA. Then the safety check is plain, deterministic code, not an LLM guessing:
+> same ingredient twice, two NSAIDs, stacked sedating antihistamines. Grok does what LLMs are good at. It reads messy
+> packaging, explains the warning in plain English grounded only in the FDA text with a citation, searches the live
+> web for recalls, and turns label directions into a dose timer that plans around your class schedule.
+>
+> No account, no database, works on your phone in the pharmacy aisle. It's not medical advice. It's the nudge to ask
+> the pharmacist before you double up.
+
+## Safety notes
+
+- The LLM never decides whether something is dangerous. `lib/checks.ts` does.
+- Explanations and chat answers are grounded in openFDA text fetched on the server, not text sent by the client.
+- Dose numbers parsed by Grok are rejected unless they literally appear in the label directions.
+- The UI always shows: "Not medical advice. Ask a pharmacist."
