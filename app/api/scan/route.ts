@@ -2,6 +2,7 @@ import { ageFlags } from "@/lib/ageChecks";
 import { ageGroup } from "@/lib/ages";
 import { findFlags, normalizeIngredient, overallStatus } from "@/lib/checks";
 import { getLabel } from "@/lib/fda";
+import { interactionFlags, markRx, singleProductFlags } from "@/lib/rx";
 import {
   BAD_KEY_HELP,
   BadKeyError,
@@ -157,6 +158,12 @@ export async function POST(req: Request) {
 
     // 3. Deterministic checks: product overlaps, then the age profile.
     const flags = findFlags(withKeys);
+    // Label cross-reference (Rx and OTC): A's label names B's ingredient or its class.
+    const xref = await interactionFlags(withKeys);
+    flags.push(...xref.flags);
+    // Single-product label warnings (boxed warning, pediatric/geriatric use): never "green" by default.
+    const single = singleProductFlags(withKeys, xref.sections, age);
+    markRx(flags, withKeys);
     const ageCheck = await ageFlags(withKeys, age, labels);
     notes.push(...ageCheck.notes);
 
@@ -180,7 +187,7 @@ export async function POST(req: Request) {
       f.citations = e.citations;
     }
     // Age flags already carry a label-quoting explanation; they go first.
-    flags.unshift(...ageCheck.flags);
+    flags.unshift(...single, ...ageCheck.flags);
 
     const lowConfidence = withKeys.some((p) => p.confidence < 0.6);
     if (lowConfidence) notes.push("Some boxes were read with low confidence. Double-check the ingredients.");

@@ -90,6 +90,19 @@ export function extractJson(text: string): unknown {
   }
 }
 
+// Keep only the dosing instruction: drop phone numbers, Rx/refill numbers, dates and
+// anything after a "Dr." / "Patient" style label, in case the model copied extra text.
+export function scrubDirections(text: string): string | undefined {
+  const t = text
+    .replace(/\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4}/g, "")
+    .replace(/\b(rx|refills?|qty|dr\.?|prescriber|patient|pharmacy|npi|dea)\b[\s#:]*[\w.-]*/gi, "")
+    .replace(/\d{1,2}\/\d{1,2}\/\d{2,4}/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+  return /\b(take|use|apply|inhale|place|chew|dissolve|instill)\b/i.test(t) ? t : undefined;
+}
+
 function validateProducts(raw: unknown): Product[] {
   const arr = Array.isArray(raw)
     ? raw
@@ -102,19 +115,31 @@ function validateProducts(raw: unknown): Product[] {
     if (typeof o.brand !== "string" || !Array.isArray(o.active_ingredients)) {
       throw new Error(`Item ${i} missing brand or active_ingredients`);
     }
+    // Whitelist fields: anything else the model returns (patient name, Rx number,
+    // prescriber, pharmacy, phone) is dropped here and never leaves the server.
+    const rx = o.rx === true;
+    const directions = rx && typeof o.directions === "string" ? scrubDirections(o.directions) : undefined;
     return {
-      brand: o.brand,
+      brand: o.brand.slice(0, 80),
       active_ingredients: (o.active_ingredients as Record<string, unknown>[])
         .filter((a) => a && typeof a.name === "string")
-        .map((a) => ({ name: String(a.name), strength: String(a.strength ?? "") })),
+        .map((a) => ({ name: String(a.name).slice(0, 60), strength: String(a.strength ?? "").slice(0, 30) })),
       confidence: Math.max(0, Math.min(1, Number(o.confidence ?? 0.5))),
+      ...(rx ? { rx: true, ...(directions ? { directions } : {}) } : {}),
     };
   });
 }
 
 const VISION_PROMPT = `You read photos of over-the-counter (OTC) medication packages.
-Identify every distinct medication box or bottle in the photo (0 to 5 items).
-For each, read the "Drug Facts" / "Active ingredient(s)" from the package. If the
+Identify every distinct medication box or bottle in the photo (0 to 5 items), including
+pharmacy PRESCRIPTION bottles.
+For OTC packages, read the "Drug Facts" / "Active ingredient(s)" from the package.
+For a pharmacy prescription label (no Drug Facts panel): read the drug name (brand and/or
+generic), its strength, and the directions line (e.g. "Take 1 tablet by mouth twice daily"),
+and set "rx": true. For combination drugs list each ingredient (e.g. hydrocodone 5 mg +
+acetaminophen 325 mg). NEVER output the patient's name, Rx number, prescriber, pharmacy name,
+address, phone number, dates, or refill info. Put the drug name in "brand".
+If the
 active ingredients are not visible but the product is clearly identifiable, use the
 well-known formulation of that exact product and lower the confidence.
 If you can see a medication package but cannot read enough to identify it (too small,
@@ -122,7 +147,7 @@ blurry, cut off, glare), do NOT guess: leave it out of "products" and describe t
 problem in "unreadable".
 
 Return ONLY a JSON object, no prose, no markdown fences:
-{"products": [{"brand": string, "active_ingredients": [{"name": string, "strength": string}], "confidence": number between 0 and 1}],
+{"products": [{"brand": string, "active_ingredients": [{"name": string, "strength": string}], "confidence": number between 0 and 1, "rx": boolean, "directions": string or null}],
  "unreadable": string or null}
 "unreadable" is a short reason such as "labels too small to read" or "box is blurry"; null if everything was readable.
 Use generic ingredient names (e.g. "Acetaminophen", "Doxylamine Succinate").
@@ -201,7 +226,9 @@ export async function explainFlags(
   if (flags.length === 0) return {};
   const issues = flags
     .map((f) => {
-      const texts = f.ingredients.map((i) => labelExcerpt(labels[i] ?? { ingredient: i, found: false }));
+      const texts = f.evidence?.length
+        ? f.evidence.map((e) => `SOURCE: openFDA label "${e.label}" (${e.section})\nQUOTE: ${e.quote}`)
+        : f.ingredients.map((i) => labelExcerpt(labels[i] ?? { ingredient: i, found: false }));
       return `ISSUE id=${f.id}\nproblem: ${f.title}\nproducts: ${f.products.join(", ")}\nrule source: ${f.source}\nLABEL TEXT:\n${texts.join("\n---\n")}`;
     })
     .join("\n\n=====\n\n");
@@ -255,6 +282,13 @@ function relevantQuote(text: string, ingredient: string): string {
 }
 
 export function templateExplanation(flag: Flag, labels: Record<string, LabelInfo>) {
+  if (flag.evidence?.length) {
+    const e = flag.evidence[0];
+    return {
+      explanation: `The ${e.label} label (${e.section}) warns about using it with ${flag.ingredients.join(", ")}, which is in ${flag.products[1] ?? "another product"}: "${e.quote}"`,
+      citations: flag.evidence.map((x) => `openFDA label "${x.label}" (${x.section})`),
+    };
+  }
   const found = flag.ingredients.map((i) => labels[i]).filter((l): l is LabelInfo => !!l?.found);
   const citations = found.map(labelCitation);
   const lead =

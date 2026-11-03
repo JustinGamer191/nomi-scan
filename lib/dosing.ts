@@ -15,6 +15,7 @@ export type DoseRule = {
   max_doses_24h: number | null;
   mg_per_dose: Record<string, number>; // ingredient key -> mg in one dose
   parsed_by: "grok" | "rules" | "none";
+  rx?: boolean; // schedule comes from the prescription bottle; never suggest changing it
 };
 
 export type DosingResult = {
@@ -118,6 +119,42 @@ export function parseDirections(text: string) {
 
 type Parsed = ReturnType<typeof parseDirections>;
 
+const WORD_NUM: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, half: 0.5, "1/2": 0.5 };
+
+// Pharmacy label directions, e.g. "Take 1 tablet by mouth twice daily".
+// Frequency words map to an even spacing (twice daily -> every 12h, max 2/24h).
+export function parseRxDirections(text: string): Parsed {
+  const t = text.toLowerCase();
+  const u = new RegExp(`take (\\d+(?:\\.\\d+)?|one|two|three|four|half|1/2) ${UNIT}`, "i").exec(t);
+  const units = u ? (WORD_NUM[u[1]] ?? Number(u[1])) : null;
+  const unit = u ? u[2] : null;
+  let interval: number | null = null;
+  let max: number | null = null;
+  const every = /every (\d+)(?:\s*(?:to|-)\s*\d+)?\s*(?:hours?|hrs?)/.exec(t);
+  const freq: [RegExp, number][] = [
+    [/\b(four times|4 times)( a| per)? (day|daily)\b|\bqid\b/, 4],
+    [/\b(three times|3 times)( a| per)? (day|daily)\b|\btid\b/, 3],
+    [/\b(twice|two times|2 times)( a| per)? (day|daily)\b|\bbid\b|every 12 hours/, 2],
+    [/\b(once|one time|1 time)( a| per)? (day|daily)\b|\bdaily\b|\bat bedtime\b|\bevery (morning|evening|night)\b|\bqd\b/, 1],
+  ];
+  if (every) {
+    interval = Number(every[1]);
+    max = Math.floor(24 / interval);
+  } else {
+    for (const [re, n] of freq) {
+      if (re.test(t)) {
+        interval = 24 / n;
+        max = n;
+        break;
+      }
+    }
+  }
+  const stated = new RegExp(`(?:do not take more than|not to exceed|max(?:imum)?)\\s+(\\d+)\\s+${UNIT}`, "i").exec(t);
+  const maxUnits = stated ? Number(stated[1]) : units && max ? units * max : null;
+  if (stated && units) max = Math.floor(Number(stated[1]) / units);
+  return { min_interval_h: interval, units_per_dose: units, unit, max_units_24h: maxUnits, max_doses_24h: max };
+}
+
 // Grok reads the directions; code checks every number against the source text.
 async function grokParse(text: string): Promise<Parsed | null> {
   const out = await chat([
@@ -178,7 +215,6 @@ export async function dosingFor(products: (Product & { keys: string[] })[], mock
 
   const rules = await Promise.all(
     products.map(async (p): Promise<DoseRule> => {
-      const label = await productLabel(p);
       const empty: DoseRule = {
         brand: p.brand,
         found: false,
@@ -190,6 +226,37 @@ export async function dosingFor(products: (Product & { keys: string[] })[], mock
         mg_per_dose: {},
         parsed_by: "none",
       };
+      // Prescriptions: the bottle's own directions are the schedule source.
+      if (p.rx) {
+        if (!p.directions) return { ...empty, rx: true };
+        let parsed = parseRxDirections(p.directions);
+        let by: DoseRule["parsed_by"] = "rules";
+        if (parsed.min_interval_h === null && useGrok) {
+          try {
+            const g = await grokParse(p.directions); // numbers validated against the bottle text
+            if (g?.min_interval_h) {
+              parsed = g;
+              by = "grok";
+            }
+          } catch {}
+        }
+        const mg_per_dose: Record<string, number> = {};
+        p.active_ingredients.forEach((a, i) => {
+          const mg = mgOf(a.strength);
+          if (mg && /tablet|capsule|caplet/i.test(parsed.unit ?? "tablet")) mg_per_dose[p.keys[i]] = mg * (parsed.units_per_dose ?? 1);
+        });
+        return {
+          ...empty,
+          found: parsed.min_interval_h !== null,
+          rx: true,
+          label_name: "your prescription label",
+          directions: p.directions,
+          ...parsed,
+          mg_per_dose,
+          parsed_by: by,
+        };
+      }
+      const label = await productLabel(p);
       const raw = label?.dosage_and_administration?.join(" ");
       if (!label || !raw) return empty;
       const labelName = label.openfda?.brand_name?.[0] ?? p.brand;
@@ -237,6 +304,14 @@ export async function dosingFor(products: (Product & { keys: string[] })[], mock
     }),
   );
 
-  for (const r of rules) if (!r.found) notes.push(`No dosing directions found for ${r.brand}. Follow the box.`);
+  for (const r of rules) {
+    if (r.found) continue;
+    notes.push(
+      r.rx
+        ? `Couldn't read a schedule from the ${r.brand} prescription label. Follow your prescription exactly.`
+        : `No dosing directions found for ${r.brand}. Follow the box.`,
+    );
+  }
+  if (rules.some((r) => r.rx)) notes.push("Prescription times follow your bottle's directions. Never change a prescription dose on your own.");
   return { rules, caps, notes };
 }

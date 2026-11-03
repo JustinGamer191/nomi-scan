@@ -32,3 +32,17 @@ test('handles missing strengths and label identifiers without creating broken li
   assert.match(text, /Label found/);
   assert.ok(!text.includes('https://'));
 });
+
+test('marks prescription items and carries no prescription personal info', () => {
+  const rxScan = {
+    ...scan,
+    products: [{ brand: 'Sertraline', rx: true, directions: 'Take 1 tablet by mouth once daily', confidence: 0.95, keys: ['sertraline'], active_ingredients: [{ name: 'Sertraline Hydrochloride', strength: '50 mg' }] }],
+    flags: [{ id: 'rx-a-b', kind: 'interaction', severity: 'yellow', rx: true, title: 'Sertraline + Advil: label lists an interaction', ingredients: ['ibuprofen'], products: ['Sertraline', 'Advil'], source: 'openFDA label', evidence: [{ label: 'Sertraline Hydrochloride', section: 'drug interactions', quote: 'Drugs that Interfere with Hemostasis (Non-selective NSAIDs, Aspirin, Warfarin, etc.)' }] }],
+  };
+  const text = buildScanSummary(rxScan, 'time');
+  assert.match(text, /Sertraline \[Rx\]/);
+  assert.match(text, /Directions on bottle: Take 1 tablet by mouth once daily/);
+  assert.match(text, /Label quote \(Sertraline Hydrochloride, drug interactions\)/);
+  assert.match(text, /Do not stop a prescription on your own/);
+  assert.ok(!/patient|prescriber:|Rx #|pharmacy phone/i.test(text));
+});

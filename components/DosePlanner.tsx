@@ -125,9 +125,12 @@ export default function DosePlanner({ dosing, mock }: { dosing: DosingResult; mo
           const ready = next !== null && next <= now + 5 * 60_000;
           return (
             <article key={r.brand} className="rounded-2xl border border-stone-200 bg-white p-4">
-              <h4 className="font-semibold leading-snug">{r.brand}</h4>
+              <h4 className="font-semibold leading-snug">
+                {r.brand}
+                {r.rx && <span className="ml-2 inline-block rounded-md bg-indigo-600 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">Rx</span>}
+              </h4>
               <p className="mt-1 text-xs text-stone-500">
-                Label: {r.units_per_dose ?? "?"} {r.unit ?? "units"} every {r.min_interval_h}h
+                {r.rx ? "Your bottle" : "Label"}: {r.units_per_dose ?? "?"} {r.unit ?? "units"} every {r.min_interval_h}h
                 {r.max_doses_24h !== null && `, max ${r.max_doses_24h} doses / 24h`}
               </p>
               <p className={`mt-3 text-lg font-semibold ${ready ? "text-emerald-700" : "text-stone-900"}`}>
@@ -136,7 +139,7 @@ export default function DosePlanner({ dosing, mock }: { dosing: DosingResult; mo
               {left !== null && <p className="text-sm text-stone-600">{left} dose(s) left in the last 24h window</p>}
               <details className="mt-2 text-xs text-stone-500">
                 <summary className="cursor-pointer">Label directions ({r.parsed_by === "grok" ? "read by Grok, checked in code" : "parsed by rules"})</summary>
-                <p className="mt-1">&ldquo;{r.directions}&rdquo; (openFDA label &ldquo;{r.label_name}&rdquo;)</p>
+                <p className="mt-1">&ldquo;{r.directions}&rdquo; {r.rx ? "(from your prescription bottle. Never change a prescription dose.)" : <>(openFDA label &ldquo;{r.label_name}&rdquo;)</>}</p>
               </details>
             </article>
           );

@@ -9,6 +9,7 @@ import ScanSummary from "@/components/ScanSummary";
 import { ageGroup, DEFAULT_AGE, isUnder12, type AgeGroupId } from "@/lib/ages";
 import type { DosingResult } from "@/lib/dosing";
 import type { RecallReport } from "@/lib/recalls";
+import { singleProductHeadline } from "@/lib/statusText";
 import type { Flag, LabelInfo, ScanResult } from "@/lib/types";
 
 // Downscale big phone photos before upload (faster, cheaper, still readable).
@@ -198,8 +199,8 @@ export default function Home() {
           Snap your meds. Catch the overlap.
         </h1>
         <p className="mt-2 max-w-xl text-stone-600">
-          Photos of up to 5 OTC products, all in one shot or one per photo. We read the active ingredients, pull the FDA
-          labels, and flag doubled-up or conflicting medicines.
+          Photos of up to 5 medicines, OTC boxes or prescription bottles, in one shot or one per photo. We read the
+          ingredients, pull the FDA labels, and flag doubled-up or interacting medicines.
         </p>
         <AgePicker value={age} onChange={changeAge} />
       </header>
@@ -452,18 +453,20 @@ function Results({
 }) {
   const s = STATUS[result.status];
   const profile = ageGroup(result.age);
+  const single = singleProductHeadline(result.flags);
   const ageOnlyRed =
+    !single &&
     result.status === "red" && !result.flags.some((f) => f.severity === "red" && f.kind !== "age");
   return (
     <div className="space-y-6">
       <section className={`rounded-2xl border p-5 ${s.ring}`} data-status={result.status}>
         <div className="flex items-center gap-3">
           <span className={`h-4 w-4 shrink-0 rounded-full ${s.dot}`} />
-          <h2 className="text-xl font-semibold">{ageOnlyRed ? "Not for this age without asking" : s.label}</h2>
+          <h2 className="text-xl font-semibold">{single ? single.title : ageOnlyRed ? "Not for this age without asking" : s.label}</h2>
           <span className="ml-auto text-xs uppercase tracking-wide opacity-70">{result.status}</span>
         </div>
         <p className="mt-1 pl-7 text-sm opacity-80">
-          {ageOnlyRed ? "A label warning applies to this age group." : s.sub} Checked for: {profile.label}.
+          {single ? single.sub : ageOnlyRed ? "A label warning applies to this age group." : s.sub} Checked for: {profile.label}.
         </p>
       </section>
 
@@ -484,11 +487,15 @@ function Results({
           {result.products.map((p, i) => (
             <article key={i} className="rounded-2xl border border-stone-200 bg-white p-4">
               <div className="flex items-start justify-between gap-2">
-                <h4 className="font-semibold leading-snug">{p.brand}</h4>
+                <h4 className="font-semibold leading-snug">
+                  {p.brand}
+                  {p.rx && <span className="ml-2 inline-block rounded-md bg-indigo-600 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">Rx</span>}
+                </h4>
                 <span className="shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-500">
                   {Math.round(p.confidence * 100)}% sure
                 </span>
               </div>
+              {p.rx && p.directions && <p className="mt-1 text-xs text-stone-600">Bottle: {p.directions}</p>}
               {result.image_count > 1 && p.images && p.images.length > 0 && (
                 <p className="mt-0.5 text-xs text-stone-400">
                   Seen in photo{p.images.length > 1 ? "s" : ""} {p.images.join(", ")}
@@ -547,6 +554,11 @@ function FlagCard({ flag }: { flag: Flag }) {
         )}
       </div>
       <p className="mt-1 text-xs text-stone-500">In: {flag.products.join(" + ")}</p>
+      {flag.rx && (
+        <p className="mt-3 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-950">
+          Talk to your pharmacist or prescriber before combining. Do not stop a prescription on your own.
+        </p>
+      )}
       {flag.explanation && <p className="mt-3 text-[15px] leading-relaxed text-stone-800">{flag.explanation}</p>}
       <div className="mt-3 space-y-1 text-xs text-stone-500">
         {flag.citations?.map((c, i) => (

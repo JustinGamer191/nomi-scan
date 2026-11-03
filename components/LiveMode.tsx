@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgeGroupId } from "@/lib/ages";
 import type { SeenProduct } from "@/lib/pipeline";
+import { singleProductHeadline } from "@/lib/statusText";
 import type { Flag } from "@/lib/types";
 
 type Status = "red" | "yellow" | "green";
@@ -445,7 +446,7 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
           <>
             <div className={`absolute inset-x-3 top-3 flex items-center gap-2 rounded-xl px-3 py-2 shadow ${s.cls}`}>
               <span className={`h-2.5 w-2.5 rounded-full ${s.dot}`} />
-              <span className="text-sm font-semibold">{s.label}</span>
+              <span className="text-sm font-semibold">{singleProductHeadline(flags)?.title ?? s.label}</span>
               <span className="ml-auto flex items-center gap-1.5 text-xs opacity-90">
                 {paused ? (
                   "Paused"
@@ -549,6 +550,11 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
                 <h4 className="font-semibold">{f.title}</h4>
               </div>
               <p className="mt-1 text-xs text-stone-500">In: {f.products.join(" + ")}</p>
+      {f.rx && (
+        <p className="mt-3 rounded-lg bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-950">
+          Talk to your pharmacist or prescriber before combining. Do not stop a prescription on your own.
+        </p>
+      )}
               {f.explanation && <p className="mt-2 text-[15px] leading-relaxed text-stone-800">{f.explanation}</p>}
               {f.citations?.map((c, i) => (
                 <p key={i} className="mt-1 text-xs text-stone-500">
@@ -570,7 +576,10 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
             {products.map((p) => (
               <li key={p.brand + p.keys.join()} className="rounded-xl border border-stone-200 bg-white p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="font-medium">{p.brand}</span>
+                  <span className="font-medium">
+                    {p.brand}
+                    {p.rx && <span className="ml-2 inline-block rounded-md bg-indigo-600 px-1.5 py-0.5 align-middle text-[10px] font-bold uppercase tracking-wide text-white">Rx</span>}
+                  </span>
                   <span className="shrink-0 text-xs text-stone-400">seen {p.seen}x</span>
                 </div>
                 <p className="mt-1 text-sm text-stone-600">

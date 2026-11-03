@@ -20,7 +20,9 @@ export function buildScanSummary(result: ScanResult, scannedAt: string): string 
     "PRODUCTS DETECTED",
   ];
   for (const product of result.products) {
-    lines.push(`- ${product.brand} (recognition confidence: ${Math.round(product.confidence * 100)}%)`);
+    // Rx items carry only drug name, strength and the directions line (patient/prescriber/pharmacy are stripped server-side).
+    lines.push(`- ${product.brand}${product.rx ? " [Rx]" : ""} (recognition confidence: ${Math.round(product.confidence * 100)}%)`);
+    if (product.rx && product.directions) lines.push(`  Directions on bottle: ${product.directions}`);
     for (const ingredient of product.active_ingredients) {
       lines.push(`  - ${ingredient.name}: ${ingredient.strength || "Strength not read"}`);
     }
@@ -30,6 +32,8 @@ export function buildScanSummary(result: ScanResult, scannedAt: string): string 
   for (const flag of result.flags) {
     lines.push(`- [${flag.severity.toUpperCase()}] ${flag.title}`, `  Products: ${flag.products.join(" + ")}`);
     if (flag.explanation) lines.push(`  ${flag.explanation}`);
+    for (const e of flag.evidence ?? []) lines.push(`  Label quote (${e.label}, ${e.section}): "${e.quote}"`);
+    if (flag.rx) lines.push("  Talk to your pharmacist or prescriber before combining. Do not stop a prescription on your own.");
     lines.push(`  Rule source: ${flag.source}`);
     for (const citation of flag.citations ?? []) lines.push(`  Citation: ${citation}`);
   }

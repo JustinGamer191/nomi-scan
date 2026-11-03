@@ -6,6 +6,8 @@ export type Product = {
   brand: string;
   active_ingredients: Ingredient[];
   confidence: number;
+  rx?: boolean; // pharmacy prescription label
+  directions?: string; // Rx only: the directions line on the bottle ("Take 1 tablet by mouth twice daily")
 };
 
 export type LabelInfo = {
@@ -23,7 +25,7 @@ export type Severity = "red" | "yellow";
 
 export type Flag = {
   id: string;
-  kind: "duplicate" | "class" | "age";
+  kind: "duplicate" | "class" | "age" | "interaction" | "boxed";
   severity: Severity;
   title: string;
   ingredients: string[]; // normalized keys involved
@@ -31,6 +33,8 @@ export type Flag = {
   source: string; // where the rule comes from
   explanation?: string;
   citations?: string[];
+  rx?: boolean; // involves a prescription product
+  evidence?: { label: string; section: string; quote: string }[]; // exact label sentences that triggered it
 };
 
 export type ScanResult = {

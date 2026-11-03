@@ -1,6 +1,6 @@
 import { ageGroup } from "@/lib/ages";
 import { BAD_KEY_HELP, BadKeyError, KEY_HELP, MODEL, hasKey, readBoxes } from "@/lib/grok";
-import { MOCK_PRODUCTS } from "@/lib/mock";
+import { MOCK_PRODUCTS, MOCK_SCENARIOS } from "@/lib/mock";
 import { analyze, mergeSeen, type SeenProduct } from "@/lib/pipeline";
 import type { Product } from "@/lib/types";
 
@@ -12,6 +12,7 @@ type Body = {
   mock?: boolean;
   tick?: number; // frame counter, drives the MOCK timeline
   age?: string; // age profile id
+  scenario?: string; // MOCK only: e.g. "rx" or "fentanyl" instead of the Tylenol + NyQuil timeline
 };
 
 const MAX_DATA_URL = 4 * 1024 * 1024;
@@ -38,6 +39,7 @@ function cleanSeen(raw: unknown): SeenProduct[] {
       confidence: Number(p.confidence) || 0.5,
       keys: p.keys.map(String),
       seen: Number(p.seen) || 1,
+      ...(p.rx === true ? { rx: true, ...(typeof p.directions === "string" ? { directions: p.directions.slice(0, 200) } : {}) } : {}),
     }));
 }
 
@@ -49,7 +51,8 @@ export async function POST(req: Request) {
   let hint: string | null = null;
 
   if (mock) {
-    detected = mockFrame(Number(body.tick) || 0);
+    const sc = body.scenario && body.scenario !== "1" ? MOCK_SCENARIOS[body.scenario] : undefined;
+    detected = sc ? ((Number(body.tick) || 0) >= 1 ? sc : []) : mockFrame(Number(body.tick) || 0);
   } else {
     if (!hasKey()) return Response.json({ error: KEY_HELP }, { status: 500 });
     const img = body.image ?? "";

@@ -65,6 +65,29 @@ camera. Demo on the laptop itself, or tunnel with `ngrok http 3000` (use the htt
 API routes: `/api/scan` (main), `/api/live-frame`, `/api/voice/tts`, `/api/voice/stt`, `/api/recalls`, `/api/ask`, `/api/dosing`, `/api/schedule`. No database. Dose logs
 stay in the browser's localStorage.
 
+### Prescriptions
+
+Pharmacy bottles work too. Grok reads the drug name, strength and the directions line, and sets `rx: true`. The
+server keeps only those fields: patient name, Rx number, prescriber, pharmacy and phone are never returned (prompted
+out, then whitelisted and scrubbed in `lib/grok.ts`).
+
+- **Duplicates across Rx and OTC:** for example hydrocodone/APAP plus Tylenol is red for acetaminophen.
+- **Label cross-reference (`lib/rx.ts`):** if product A's FDA label (boxed warning, contraindications, drug
+  interactions, or the OTC "Do not use" / "Ask a doctor or pharmacist" lines) names product B's ingredient or a class
+  it belongs to (NSAIDs, MAOIs, SSRIs, benzodiazepines, opioids, anticoagulants, CNS depressants), it's flagged and
+  the exact sentence is quoted. A mention in a boxed warning or contraindication is red; in interactions it's yellow.
+- **Single-product warnings:** a boxed warning makes the result at least yellow. It's red for a high-alert class
+  (opioid, benzodiazepine, anticoagulant) when the age profile is under 18 or 65+. Pediatric and geriatric use
+  sections are quoted. Controlled substances get "This is a controlled medication. Only take it as prescribed to you.",
+  and injectables say they're given by a healthcare provider.
+- **Dose planner:** for Rx items, times follow the bottle's directions, parsed in code ("twice daily" means every 12h).
+  Prescription doses are never changed.
+- **Ask Nomi:** units and abbreviations (mcg, mL, q6h, BID) get direct answers. Rx dose questions are answered from
+  the bottle, or get "Prescription dosing comes from your prescriber; follow the directions on your label or ask your
+  pharmacist."
+- **Mock scenarios:** `?mock=rx` (sertraline + hydrocodone/APAP + Tylenol + Advil) and `?mock=fentanyl` (a single
+  injectable opioid; try `&age=infant`). Both also work in Live mode through the `scenario` field.
+
 ### MOCK mode
 
 `MOCK=1` (env) or `?mock=1` returns canned Grok output for **Tylenol Extra Strength + Vicks NyQuil Cold & Flu**. The

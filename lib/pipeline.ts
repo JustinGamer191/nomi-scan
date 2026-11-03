@@ -4,6 +4,7 @@ import { ageFlags } from "./ageChecks";
 import type { AgeGroup } from "./ages";
 import { findFlags, normalizeIngredient, overallStatus } from "./checks";
 import { getLabel } from "./fda";
+import { interactionFlags, markRx, singleProductFlags } from "./rx";
 import { templateExplanation } from "./grok";
 import type { Flag, LabelInfo, Product } from "./types";
 
@@ -40,9 +41,14 @@ export async function analyze(products: SeenProduct[], age: AgeGroup) {
   const labelList = await Promise.all(unique.map((i) => getLabel(i)));
   const labels: Record<string, LabelInfo> = Object.fromEntries(labelList.map((l) => [l.ingredient, l]));
   const flags: Flag[] = findFlags(products);
+  const xref = await interactionFlags(products);
+  flags.push(...xref.flags);
+  markRx(flags, products);
   // Live mode uses the deterministic, quote-the-label explanation: instant and grounded.
   for (const f of flags) Object.assign(f, templateExplanation(f, labels));
-  // Age flags come with their own label-quoting explanation.
+  // Single-product label warnings and age flags carry their own label-quoting explanation.
+  flags.unshift(...singleProductFlags(products, xref.sections, age));
+  markRx(flags, products);
   flags.push(...(await ageFlags(products, age, labels)).flags);
   const uncertain = products.some((p) => p.confidence < 0.6) || labelList.some((l) => !l.found);
   return {
