@@ -2,7 +2,7 @@ import type { Flag, LabelInfo, Product } from "./types";
 import { labelCitation } from "./fda";
 
 const ENDPOINT = "https://api.x.ai/v1/chat/completions";
-export const MODEL = process.env.XAI_MODEL || "grok-4.7";
+export const MODEL = process.env.XAI_MODEL || "grok-4.20-0309-non-reasoning";
 
 export class MissingKeyError extends Error {}
 export class BadKeyError extends Error {}
