@@ -15,6 +15,7 @@ import {
   type ImageRead,
 } from "@/lib/grok";
 import { MOCK_PRODUCTS, MOCK_SCENARIOS } from "@/lib/mock";
+import { sameProduct } from "@/lib/productMatch";
 import type { LabelInfo, Product, ScanResult } from "@/lib/types";
 
 export const maxDuration = 60;
@@ -25,26 +26,21 @@ const MAX_PRODUCTS = 5;
 
 type PerImage = ImageRead & { error?: string };
 
-function brandKey(b: string) {
-  return b.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-// Same product seen in several photos: same brand + same ingredient set -> keep one.
+// Same product seen in several photos (or named slightly differently) -> keep one.
 function mergeProducts(reads: PerImage[]) {
-  const merged = new Map<string, Product & { keys: string[]; images: number[] }>();
+  const merged: (Product & { keys: string[]; images: number[] })[] = [];
   reads.forEach((r, i) => {
     for (const p of r.products) {
       const keys = p.active_ingredients.map((a) => normalizeIngredient(a.name)).filter(Boolean);
-      const id = `${brandKey(p.brand)}|${[...new Set(keys)].sort().join(",")}`;
-      const prev = merged.get(id);
-      if (!prev) merged.set(id, { ...p, keys, images: [i + 1] });
+      const prev = merged.find((q) => sameProduct(q, p));
+      if (!prev) merged.push({ ...p, keys, images: [i + 1] });
       else {
         if (!prev.images.includes(i + 1)) prev.images.push(i + 1);
         if (p.confidence > prev.confidence) Object.assign(prev, { ...p, keys, images: prev.images });
       }
     }
   });
-  return [...merged.values()];
+  return merged;
 }
 
 function mockReads(scenario: string, imageCount: number): PerImage[] {

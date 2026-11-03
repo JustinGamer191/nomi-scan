@@ -6,34 +6,29 @@ import { findFlags, normalizeIngredient, overallStatus } from "./checks";
 import { getLabel } from "./fda";
 import { interactionFlags, markRx, singleProductFlags } from "./rx";
 import { templateExplanation } from "./grok";
+import { sameProduct } from "./productMatch";
 import type { Flag, LabelInfo, Product } from "./types";
+
+export { brandKey, productId, sameProduct } from "./productMatch";
 
 export type SeenProduct = Product & { keys: string[]; seen: number };
 
-const brandKey = (b: string) => b.toLowerCase().replace(/[^a-z0-9]/g, "");
-
-export function productId(p: Product) {
-  const keys = p.active_ingredients.map((a) => normalizeIngredient(a.name)).filter(Boolean);
-  return `${brandKey(p.brand)}|${[...new Set(keys)].sort().join(",")}`;
-}
-
-// Add new sightings to the running list. Same brand + same ingredients = same product.
+// Add new sightings to the running list.
 export function mergeSeen(seen: SeenProduct[], incoming: Product[], max = 5) {
-  const map = new Map(seen.map((p) => [productId(p), { ...p }]));
+  const list = seen.map((p) => ({ ...p }));
   const added: string[] = [];
   for (const p of incoming) {
-    const id = productId(p);
     const keys = p.active_ingredients.map((a) => normalizeIngredient(a.name)).filter(Boolean);
-    const prev = map.get(id);
+    const prev = list.find((q) => sameProduct(q, p));
     if (prev) {
       prev.seen += 1;
       if (p.confidence > prev.confidence) Object.assign(prev, { ...p, keys, seen: prev.seen });
-    } else if (map.size < max) {
-      map.set(id, { ...p, keys, seen: 1 });
+    } else if (list.length < max) {
+      list.push({ ...p, keys, seen: 1 });
       added.push(p.brand);
     }
   }
-  return { products: [...map.values()], added };
+  return { products: list, added };
 }
 
 export async function analyze(products: SeenProduct[], age: AgeGroup) {
