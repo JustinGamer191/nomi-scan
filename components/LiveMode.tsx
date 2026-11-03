@@ -74,7 +74,13 @@ export default function LiveMode() {
   const [caption, setCaption] = useState<{ q: string; a: string } | null>(null);
   const [typed, setTyped] = useState("");
   const [asking, setAsking] = useState(false);
-  const [srSupported, setSrSupported] = useState(true);
+  const [srSupported, setSrSupported] = useState(true); // any voice input available
+  const [voiceOut, setVoiceOut] = useState<"grok" | "browser">("grok");
+  const [micMode, setMicMode] = useState<"grok" | "browser" | "none">("grok");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const speechGen = useRef(0);
+  const speechChain = useRef<Promise<void>>(Promise.resolve());
+  const recorderRef = useRef<MediaRecorder | null>(null);
   const mutedRef = useRef(muted);
   useEffect(() => {
     mutedRef.current = muted;
@@ -82,15 +88,74 @@ export default function LiveMode() {
 
   useEffect(() => {
     const w = window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
+    const hasSR = !!(w.SpeechRecognition || w.webkitSpeechRecognition);
+    const hasRec = typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSrSupported(!!(w.SpeechRecognition || w.webkitSpeechRecognition));
+    setMicMode(hasRec ? "grok" : hasSR ? "browser" : "none");
+    setSrSupported(hasRec || hasSR);
   }, []);
 
-  const speak = useCallback((text: string) => {
-    if (mutedRef.current || typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.05;
-    window.speechSynthesis.speak(u);
+  const browserSpeak = useCallback(
+    (text: string) =>
+      new Promise<void>((resolve) => {
+        if (!("speechSynthesis" in window)) return resolve();
+        const u = new SpeechSynthesisUtterance(text);
+        u.rate = 1.05;
+        u.onend = () => resolve();
+        u.onerror = () => resolve();
+        window.speechSynthesis.speak(u);
+      }),
+    [],
+  );
+
+  // Grok voice via our /api/voice/tts proxy (key stays on the server).
+  // Falls back to the browser's speechSynthesis if the call or playback fails.
+  const grokSpeak = useCallback(
+    async (text: string, gen: number) => {
+      try {
+        const res = await fetch("/api/voice/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        });
+        if (!res.ok) throw new Error(`tts ${res.status}`);
+        const url = URL.createObjectURL(await res.blob());
+        if (gen !== speechGen.current || mutedRef.current) return URL.revokeObjectURL(url);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        await new Promise<void>((resolve, reject) => {
+          audio.onended = () => resolve();
+          audio.onpause = () => resolve();
+          audio.onerror = () => reject(new Error("playback"));
+          audio.play().catch(reject);
+        });
+        URL.revokeObjectURL(url);
+        setVoiceOut("grok");
+      } catch {
+        if (gen !== speechGen.current || mutedRef.current) return;
+        setVoiceOut("browser");
+        await browserSpeak(text);
+      }
+    },
+    [browserSpeak],
+  );
+
+  // Queue utterances so a warning and an answer never talk over each other.
+  const speak = useCallback(
+    (text: string) => {
+      if (mutedRef.current || typeof window === "undefined") return;
+      const gen = speechGen.current;
+      speechChain.current = speechChain.current.then(() => (gen === speechGen.current ? grokSpeak(text, gen) : undefined));
+    },
+    [grokSpeak],
+  );
+
+  const stopSpeech = useCallback(() => {
+    speechGen.current += 1;
+    speechChain.current = Promise.resolve();
+    audioRef.current?.pause();
+    audioRef.current = null;
+    window.speechSynthesis?.cancel();
   }, []);
 
   const stopCamera = useCallback(() => {
@@ -217,7 +282,8 @@ export default function LiveMode() {
     stopCamera();
     setRunning(null);
     setPaused(false);
-    window.speechSynthesis?.cancel();
+    stopSpeech();
+    recorderRef.current?.stop();
   }
 
   async function ask(question: string) {
@@ -248,9 +314,60 @@ export default function LiveMode() {
     }
   }
 
+  // Grok speech-to-text: record a short clip, send it to /api/voice/stt.
+  async function startGrokMic() {
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setError("Microphone permission was denied. Type your question instead.");
+      setMicMode("none");
+      setSrSupported(false);
+      return;
+    }
+    const rec = new MediaRecorder(stream);
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    rec.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      recorderRef.current = null;
+      setListening(false);
+      const blob = new Blob(chunks, { type: rec.mimeType || "audio/webm" });
+      if (blob.size < 1000) return;
+      setCaption({ q: "...", a: "Transcribing with Grok..." });
+      try {
+        const fd = new FormData();
+        fd.append("audio", blob, rec.mimeType.includes("mp4") ? "question.mp4" : "question.webm");
+        const res = await fetch("/api/voice/stt", { method: "POST", body: fd });
+        const data = (await res.json()) as { text?: string; error?: string };
+        if (!res.ok) throw new Error(data.error);
+        if (data.text) ask(data.text);
+        else setCaption({ q: "(didn't catch that)", a: "Try again, a little closer to the mic." });
+      } catch {
+        // Fall back to the browser recognizer for the next question.
+        const w = window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
+        const fallback = !!(w.SpeechRecognition || w.webkitSpeechRecognition);
+        setMicMode(fallback ? "browser" : "none");
+        setSrSupported(fallback);
+        setCaption({ q: "(transcription failed)", a: fallback ? "Switched to browser speech. Tap Ask Nomi again." : "Type your question below." });
+      }
+    };
+    recorderRef.current = rec;
+    setListening(true);
+    rec.start();
+    // Safety stop after 12s.
+    setTimeout(() => rec.state === "recording" && rec.stop(), 12000);
+  }
+
   function toggleMic() {
     if (listening) {
-      recRef.current?.stop();
+      if (recorderRef.current) recorderRef.current.stop();
+      else recRef.current?.stop();
+      return;
+    }
+    stopSpeech();
+    if (micMode === "grok") {
+      startGrokMic();
       return;
     }
     const w = window as unknown as { SpeechRecognition?: RecognitionCtor; webkitSpeechRecognition?: RecognitionCtor };
@@ -259,7 +376,6 @@ export default function LiveMode() {
       setSrSupported(false);
       return;
     }
-    window.speechSynthesis?.cancel();
     const rec = new Ctor();
     rec.lang = "en-US";
     rec.interimResults = true;
@@ -334,6 +450,16 @@ export default function LiveMode() {
                 )}
               </span>
             </div>
+            <div className="absolute right-3 top-14 flex gap-1.5 text-[11px] font-medium">
+              <span className={`rounded-full px-2 py-0.5 ${voiceOut === "grok" ? "bg-black/70 text-white" : "bg-white/80 text-stone-800"}`}>
+                Voice: {voiceOut === "grok" ? "Grok" : "browser"}
+              </span>
+              {micMode !== "none" && (
+                <span className={`rounded-full px-2 py-0.5 ${micMode === "grok" ? "bg-black/70 text-white" : "bg-white/80 text-stone-800"}`}>
+                  Mic: {micMode === "grok" ? "Grok" : "browser"}
+                </span>
+              )}
+            </div>
             {caption && (
               <div className="absolute inset-x-3 bottom-20 rounded-xl bg-black/70 px-3 py-2 text-sm text-white" aria-live="polite">
                 <p className="text-white/70">&ldquo;{caption.q}&rdquo;</p>
@@ -350,7 +476,7 @@ export default function LiveMode() {
               <button
                 onClick={() => {
                   setMuted((m) => !m);
-                  window.speechSynthesis?.cancel();
+                  stopSpeech();
                 }}
                 aria-pressed={muted}
                 className="rounded-full bg-white/90 px-4 py-2.5 text-sm font-medium text-stone-900"

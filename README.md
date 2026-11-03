@@ -44,11 +44,17 @@ max) to `/api/live-frame` every 2.5 seconds, but only when the previous frame ha
 so far", deduped like multi-photo. The same openFDA and deterministic checks rerun each time, and the status bar turns
 red, yellow or green as you go.
 
-- **Voice warnings:** when a new flag appears, Nomi says it out loud with the browser's `speechSynthesis`, in 20 words
-  or less built from the flag itself ("Warning. Tylenol and NyQuil both contain acetaminophen..."). There's a Mute button.
-- **Voice questions:** tap **Ask Nomi**, speak, and tap again. It uses Web Speech `SpeechRecognition` and sends the
-  question to `/api/ask` (grounded in the seen products' FDA labels). The answer is spoken and shown as captions.
-  Where speech recognition isn't supported (Firefox, some Safari setups), a text box replaces the mic.
+- **Grok voice warnings:** when a new flag appears, Nomi speaks it with xAI's Grok text-to-speech (`/api/voice/tts`
+  proxies `https://api.x.ai/v1/tts`, voice `eve`, so the key never reaches the browser). The sentence is built in code
+  from the flag, 20 words or less ("Warning. Tylenol and NyQuil both contain acetaminophen..."). Grok only voices it.
+  There's a Mute button.
+- **Grok voice questions:** tap **Ask Nomi**, speak, and tap again. The clip goes to xAI speech-to-text
+  (`/api/voice/stt` proxies `https://api.x.ai/v1/stt`), the question goes to `/api/ask` (grounded in the seen
+  products' FDA labels), and the answer is spoken in Grok voice and shown as captions.
+- **Honest fallback:** if an xAI voice call fails (or there's no key), Live mode falls back to the browser's
+  `speechSynthesis` / `SpeechRecognition` automatically, and the badges on the video say **Voice: Grok** or
+  **Voice: browser** (and the same for Mic). With no mic support, a text box appears instead. Set `XAI_VOICE` to pick
+  another voice (`GET https://api.x.ai/v1/tts/voices` lists them, e.g. `ara`, `rex`).
 - **Demo without camera:** simulates Tylenol at about 2.5s and NyQuil at about 5s, so the red warning fires about
   6 seconds in. It works with no camera and no key.
 
@@ -56,7 +62,7 @@ red, yellow or green as you go.
 camera. Demo on the laptop itself, or tunnel with `ngrok http 3000` (use the https URL on the phone), or run
 `npx next dev --experimental-https`. Voice recognition works best in Chrome.
 
-API routes: `/api/scan` (main), `/api/live-frame`, `/api/recalls`, `/api/ask`, `/api/dosing`, `/api/schedule`. No database. Dose logs
+API routes: `/api/scan` (main), `/api/live-frame`, `/api/voice/tts`, `/api/voice/stt`, `/api/recalls`, `/api/ask`, `/api/dosing`, `/api/schedule`. No database. Dose logs
 stay in the browser's localStorage.
 
 ### MOCK mode
