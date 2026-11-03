@@ -53,11 +53,13 @@ export default function ResultsPanel({
   scannedAt,
   debounceMs = 0,
   explain = false,
+  fetchExtras = true,
 }: {
   result: ScanResult;
   scannedAt: string;
   debounceMs?: number; // Live mode: wait for the seen list to settle
   explain?: boolean; // Live mode: upgrade template explanations with a debounced Grok call
+  fetchExtras?: boolean; // History: false = show the saved result without any new calls
 }) {
   const [recalls, setRecalls] = useState<Record<string, RecallReport>>({});
   const [recallsLoading, setRecallsLoading] = useState(false);
@@ -74,6 +76,7 @@ export default function ResultsPanel({
 
   // Recalls + dosing, debounced, cached per product (recalls) / product set (dosing).
   useEffect(() => {
+    if (!fetchExtras) return;
     const t = setTimeout(() => {
       const r = latest.current;
       const products = r.products;
@@ -111,7 +114,7 @@ export default function ResultsPanel({
         .finally(() => setDosingLoading(false));
     }, debounceMs);
     return () => clearTimeout(t);
-  }, [productKey, timerOn, debounceMs]);
+  }, [productKey, timerOn, debounceMs, fetchExtras]);
 
   // Live mode: Grok explanations for new flags, debounced and cached per flag.
   useEffect(() => {

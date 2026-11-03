@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import AgePicker from "@/components/AgePicker";
+import HistoryView from "@/components/HistoryView";
 import LiveMode from "@/components/LiveMode";
+import { makeThumb, saveScan } from "@/lib/history";
 import ResultsPanel from "@/components/ResultsPanel";
 import { ageGroup, DEFAULT_AGE, type AgeGroupId } from "@/lib/ages";
 import type { ScanResult } from "@/lib/types";
@@ -29,7 +31,7 @@ const AGE_KEY = "nomi-age";
 type Photo = { id: string; file: File; url: string };
 
 export default function Home() {
-  const [mode, setMode] = useState<"upload" | "live">("upload");
+  const [mode, setMode] = useState<"upload" | "live" | "history">("upload");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [scanError, setScanError] = useState<{ message: string; hints: string[] } | null>(null);
   const [drag, setDrag] = useState(false);
@@ -107,8 +109,12 @@ export default function Home() {
         return;
       }
       const scanned = data as ScanResult;
-      setScannedAt(new Date().toISOString());
+      const at = new Date().toISOString();
+      setScannedAt(at);
       setResult(scanned);
+      // On-device history (mock scans too, so the demo has history).
+      const thumb = !mock && photos[0] ? await makeThumb(photos[0].file) : undefined;
+      saveScan("upload", scanned, at, thumb);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Scan failed");
     } finally {
@@ -128,7 +134,7 @@ export default function Home() {
           </span>
         </div>
         <div role="tablist" aria-label="Mode" className="mt-6 inline-flex rounded-xl border border-stone-200 bg-white p-1">
-          {(["upload", "live"] as const).map((m) => (
+          {(["upload", "live", "history"] as const).map((m) => (
             <button
               key={m}
               role="tab"
@@ -138,7 +144,7 @@ export default function Home() {
                 mode === m ? "bg-stone-900 text-white" : "text-stone-600 hover:text-stone-900"
               }`}
             >
-              {m === "upload" ? "Upload" : "Live"}
+              {m === "upload" ? "Upload" : m === "live" ? "Live" : "History"}
             </button>
           ))}
         </div>
@@ -153,7 +159,9 @@ export default function Home() {
       </header>
 
       <main className="mx-auto mt-6 max-w-3xl space-y-6 px-4">
-        {mode === "live" ? (
+        {mode === "history" ? (
+          <HistoryView />
+        ) : mode === "live" ? (
           <LiveMode age={age} />
         ) : (
           <>

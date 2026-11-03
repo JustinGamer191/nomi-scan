@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ResultsPanel from "@/components/ResultsPanel";
+import { makeThumb, saveScan } from "@/lib/history";
 import type { AgeGroupId } from "@/lib/ages";
 import type { SeenProduct } from "@/lib/pipeline";
 import { singleProductHeadline } from "@/lib/statusText";
@@ -295,7 +296,33 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
     setPaused(false);
   }
 
-  function stopAll() {
+  // The accumulated "Seen so far" list as a ScanResult, so Live renders the same
+  // result panels as Upload (flags, recalls, summary, Ask Nomi, dose planner).
+  const liveResult = useMemo<ScanResult | null>(
+    () =>
+      products.length
+        ? {
+            mock: mockData || running === "demo",
+            age,
+            model: "live",
+            status,
+            products,
+            image_count: 0,
+            hints: hint ? [`Last frame: ${hint}`] : [],
+            labels,
+            flags,
+            notes: ["Live mode session: products accumulated from the camera."],
+          }
+        : null,
+    [products, flags, labels, status, age, hint, mockData, running],
+  );
+
+  async function stopAll() {
+    // Save the session to on-device history before tearing down.
+    if (liveResult) {
+      const thumb = running === "camera" && videoRef.current ? await makeThumb(videoRef.current) : undefined;
+      saveScan("live", liveResult, sessionAt, thumb);
+    }
     stopCamera();
     setRunning(null);
     setPaused(false);
@@ -418,27 +445,6 @@ export default function LiveMode({ age }: { age: AgeGroupId }) {
     setListening(true);
     rec.start();
   }
-
-  // The accumulated "Seen so far" list as a ScanResult, so Live renders the same
-  // result panels as Upload (flags, recalls, summary, Ask Nomi, dose planner).
-  const liveResult = useMemo<ScanResult | null>(
-    () =>
-      products.length
-        ? {
-            mock: mockData || running === "demo",
-            age,
-            model: "live",
-            status,
-            products,
-            image_count: 0,
-            hints: hint ? [`Last frame: ${hint}`] : [],
-            labels,
-            flags,
-            notes: ["Live mode session: products accumulated from the camera."],
-          }
-        : null,
-    [products, flags, labels, status, age, hint, mockData, running],
-  );
 
   const s = STATUS_STYLE[status];
 

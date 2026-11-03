@@ -94,6 +94,15 @@ out, then whitelisted and scrubbed in `lib/grok.ts`).
 - **Mock scenarios:** `?mock=rx` (sertraline + hydrocodone/APAP + Tylenol + Advil) and `?mock=fentanyl` (a single
   injectable opioid; try `&age=infant`). Both also work in Live mode through the `scenario` field.
 
+### History (on-device only)
+
+Every finished Upload scan and every ended Live session (mock ones too) is saved to this browser's
+`localStorage`, capped at the last 50. Nothing goes to a server, because this is health data. Each entry keeps the
+time, mode, products with Rx badges, status, flags and a ~200px thumbnail. Thumbnails are dropped first if storage is
+tight. Open **History** to reopen a saved result with no new Grok calls, re-check it against the latest FDA labels
+(`/api/recheck` reruns openFDA and the checks with no vision call), delete one entry, or clear everything.
+Prescription personal info is stripped before it's ever stored.
+
 ### MOCK mode
 
 `MOCK=1` (env) or `?mock=1` returns canned Grok output for **Tylenol Extra Strength + Vicks NyQuil Cold & Flu**. The
