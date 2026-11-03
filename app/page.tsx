@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import AgePicker from "@/components/AgePicker";
 import AskNomi from "@/components/AskNomi";
 import DosePlanner from "@/components/DosePlanner";
 import LiveMode from "@/components/LiveMode";
+import { ageGroup, DEFAULT_AGE, isUnder12, type AgeGroupId } from "@/lib/ages";
 import type { DosingResult } from "@/lib/dosing";
 import type { RecallReport } from "@/lib/recalls";
 import type { Flag, LabelInfo, ScanResult } from "@/lib/types";
@@ -25,6 +27,7 @@ async function shrink(file: File, max = 1800): Promise<Blob> {
 }
 
 const MAX_PHOTOS = 6;
+const AGE_KEY = "nomi-age";
 
 type Photo = { id: string; file: File; url: string };
 
@@ -61,6 +64,24 @@ export default function Home() {
   const [dosing, setDosing] = useState<DosingResult | "loading" | null>(null);
   const pickRef = useRef<HTMLInputElement>(null);
   const camRef = useRef<HTMLInputElement>(null);
+  const [age, setAge] = useState<AgeGroupId>(DEFAULT_AGE);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(AGE_KEY);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved) setAge(ageGroup(saved).id);
+    } catch {}
+  }, []);
+
+  // A new profile changes the checks, so rerun the last scan with it.
+  function changeAge(id: AgeGroupId) {
+    setAge(id);
+    try {
+      localStorage.setItem(AGE_KEY, id);
+    } catch {}
+    if (result && !loading) scan(result.mock, id);
+  }
 
   // Add one or more photos (file picker, drop, or one camera shot at a time).
   const addFiles = useCallback((list: FileList | File[] | null | undefined) => {
@@ -92,7 +113,7 @@ export default function Home() {
     setScanError(null);
   }
 
-  async function scan(mock = false) {
+  async function scan(mock = false, forAge: AgeGroupId = age) {
     setLoading(true);
     setError(null);
     setScanError(null);
@@ -101,6 +122,7 @@ export default function Home() {
     setDosing(null);
     try {
       const body = new FormData();
+      body.append("age", forAge);
       if (!mock) {
         const blobs = await Promise.all(photos.map((p) => shrink(p.file)));
         blobs.forEach((b, i) => body.append("image", b, `photo-${i + 1}.jpg`));
@@ -126,14 +148,17 @@ export default function Home() {
     const body = JSON.stringify({ products: scanned.products, mock: scanned.mock });
     const opts = { method: "POST", headers: { "Content-Type": "application/json" }, body };
     setRecalls("loading");
-    setDosing("loading");
+    // The dose timer schedules adult directions; kids follow the box's dosing chart.
+    const timer = !isUnder12(ageGroup(scanned.age));
+    setDosing(timer ? "loading" : null);
     fetch("/api/recalls", opts)
       .then((r) => r.json())
       .then((d: { reports?: RecallReport[] }) =>
         setRecalls(Object.fromEntries((d.reports ?? []).map((r) => [r.brand, r]))),
       )
       .catch(() => setRecalls({}));
-    fetch("/api/dosing", opts)
+    if (timer)
+      fetch("/api/dosing", opts)
       .then((r) => r.json())
       .then((d: DosingResult) => setDosing(d.rules ? d : null))
       .catch(() => setDosing(null));
@@ -173,11 +198,12 @@ export default function Home() {
           Photos of up to 5 OTC products, all in one shot or one per photo. We read the active ingredients, pull the FDA
           labels, and flag doubled-up or conflicting medicines.
         </p>
+        <AgePicker value={age} onChange={changeAge} />
       </header>
 
       <main className="mx-auto mt-6 max-w-3xl space-y-6 px-4">
         {mode === "live" ? (
-          <LiveMode />
+          <LiveMode age={age} />
         ) : (
           <>
         <section
@@ -356,7 +382,7 @@ export default function Home() {
         {result && (
           <>
             <Results result={result} flaggedKeys={flaggedKeys} recalls={recalls} />
-            <AskNomi key={result.products.map((p) => p.brand).join("|")} result={result} />
+            <AskNomi key={`${result.age}|${result.products.map((p) => p.brand).join("|")}`} result={result} />
             {dosing === "loading" && <p className="text-sm text-stone-500">Reading dosing directions from FDA labels...</p>}
             {dosing && dosing !== "loading" && <DosePlanner dosing={dosing} mock={result.mock} />}
           </>
@@ -421,15 +447,20 @@ function Results({
   recalls: Record<string, RecallReport> | "loading" | null;
 }) {
   const s = STATUS[result.status];
+  const profile = ageGroup(result.age);
+  const ageOnlyRed =
+    result.status === "red" && !result.flags.some((f) => f.severity === "red" && f.kind !== "age");
   return (
     <div className="space-y-6">
       <section className={`rounded-2xl border p-5 ${s.ring}`} data-status={result.status}>
         <div className="flex items-center gap-3">
           <span className={`h-4 w-4 shrink-0 rounded-full ${s.dot}`} />
-          <h2 className="text-xl font-semibold">{s.label}</h2>
+          <h2 className="text-xl font-semibold">{ageOnlyRed ? "Not for this age without asking" : s.label}</h2>
           <span className="ml-auto text-xs uppercase tracking-wide opacity-70">{result.status}</span>
         </div>
-        <p className="mt-1 pl-7 text-sm opacity-80">{s.sub}</p>
+        <p className="mt-1 pl-7 text-sm opacity-80">
+          {ageOnlyRed ? "A label warning applies to this age group." : s.sub} Checked for: {profile.label}.
+        </p>
       </section>
 
       {result.flags.length > 0 && (
@@ -507,6 +538,9 @@ function FlagCard({ flag }: { flag: Flag }) {
       <div className="flex items-center gap-2">
         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${red ? "bg-red-500" : "bg-amber-500"}`} />
         <h4 className="font-semibold">{flag.title}</h4>
+        {flag.kind === "age" && (
+          <span className="ml-auto shrink-0 rounded-full bg-stone-100 px-2 py-0.5 text-xs text-stone-600">Age check</span>
+        )}
       </div>
       <p className="mt-1 text-xs text-stone-500">In: {flag.products.join(" + ")}</p>
       {flag.explanation && <p className="mt-3 text-[15px] leading-relaxed text-stone-800">{flag.explanation}</p>}

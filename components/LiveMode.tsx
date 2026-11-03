@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { AgeGroupId } from "@/lib/ages";
 import type { SeenProduct } from "@/lib/pipeline";
 import type { Flag } from "@/lib/types";
 
@@ -47,12 +48,14 @@ function warningText(f: Flag): string {
   const text =
     f.kind === "duplicate"
       ? `Warning. ${names} both contain ${f.ingredients[0]}. Don't take them together. Ask a pharmacist.`
-      : `Caution. ${names}: ${f.title.toLowerCase()}. Ask a pharmacist.`;
+      : f.kind === "age"
+        ? `${f.severity === "red" ? "Warning" : "Caution"}. ${names}: ${f.title.replace(/^[^:]*: /, "")}. Ask a pharmacist.`
+        : `Caution. ${names}: ${f.title.toLowerCase()}. Ask a pharmacist.`;
   const words = text.split(/\s+/);
   return words.length <= 20 ? text : words.slice(0, 19).join(" ") + ". Ask a pharmacist.";
 }
 
-export default function LiveMode() {
+export default function LiveMode({ age }: { age: AgeGroupId }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const inFlight = useRef(false);
@@ -60,6 +63,10 @@ export default function LiveMode() {
   const seenRef = useRef<SeenProduct[]>([]);
   const spoken = useRef(new Set<string>());
   const recRef = useRef<Recognition | null>(null);
+  const ageRef = useRef(age);
+  useEffect(() => {
+    ageRef.current = age;
+  }, [age]);
 
   const [running, setRunning] = useState<null | "camera" | "demo">(null);
   const [paused, setPaused] = useState(false);
@@ -196,7 +203,7 @@ export default function LiveMode() {
       const res = await fetch("/api/live-frame", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image, seen: seenRef.current, mock: demo, tick: tick.current }),
+        body: JSON.stringify({ image, seen: seenRef.current, mock: demo, tick: tick.current, age: ageRef.current }),
       });
       const data = (await res.json()) as FrameResponse;
       tick.current += 1;
@@ -301,7 +308,7 @@ export default function LiveMode() {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, products: seenRef.current, mock: running === "demo" }),
+        body: JSON.stringify({ question: q, products: seenRef.current, mock: running === "demo", age: ageRef.current }),
       });
       const data = await res.json();
       const a = res.ok ? String(data.answer) : data.error ?? "Something went wrong.";

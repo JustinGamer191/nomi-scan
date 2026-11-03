@@ -47,7 +47,7 @@ const labelCache = new Map<string, FdaLabel | null>();
 
 // Find a label for this exact product: brand word match AND the same set of
 // active ingredients. Fall back to a single-ingredient OTC label.
-async function productLabel(p: Product & { keys: string[] }): Promise<FdaLabel | null> {
+export async function productLabel(p: Product & { keys: string[] }): Promise<FdaLabel | null> {
   const cacheKey = `${p.brand}|${[...p.keys].sort().join(",")}`;
   if (labelCache.has(cacheKey)) return labelCache.get(cacheKey)!;
   const want = [...new Set(p.keys)].sort().join(",");

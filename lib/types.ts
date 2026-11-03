@@ -1,3 +1,5 @@
+import type { AgeGroupId } from "./ages";
+
 export type Ingredient = { name: string; strength: string };
 
 export type Product = {
@@ -21,7 +23,7 @@ export type Severity = "red" | "yellow";
 
 export type Flag = {
   id: string;
-  kind: "duplicate" | "class";
+  kind: "duplicate" | "class" | "age";
   severity: Severity;
   title: string;
   ingredients: string[]; // normalized keys involved
@@ -33,6 +35,7 @@ export type Flag = {
 
 export type ScanResult = {
   mock: boolean;
+  age: AgeGroupId;
   model: string;
   status: "red" | "yellow" | "green";
   products: (Product & { keys: string[]; images?: number[] })[];

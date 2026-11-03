@@ -1,3 +1,4 @@
+import { ageGroup } from "@/lib/ages";
 import { BAD_KEY_HELP, BadKeyError, KEY_HELP, MODEL, hasKey, readBoxes } from "@/lib/grok";
 import { MOCK_PRODUCTS } from "@/lib/mock";
 import { analyze, mergeSeen, type SeenProduct } from "@/lib/pipeline";
@@ -10,6 +11,7 @@ type Body = {
   seen?: SeenProduct[];
   mock?: boolean;
   tick?: number; // frame counter, drives the MOCK timeline
+  age?: string; // age profile id
 };
 
 const MAX_DATA_URL = 4 * 1024 * 1024;
@@ -66,7 +68,7 @@ export async function POST(req: Request) {
   }
 
   const { products, added } = mergeSeen(seen, detected);
-  const { labels, flags, status } = await analyze(products);
+  const { labels, flags, status } = await analyze(products, ageGroup(body.age));
   return Response.json({
     mock,
     model: mock ? `${MODEL} (mock)` : MODEL,

@@ -23,7 +23,7 @@ export default function AskNomi({ result }: { result: ScanResult }) {
       const res = await fetch("/api/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text, products: result.products, history, mock: result.mock }),
+        body: JSON.stringify({ question: text, products: result.products, history, mock: result.mock, age: result.age }),
       });
       const data = await res.json();
       const answer = res.ok ? data.answer : data.error ?? "Something went wrong.";

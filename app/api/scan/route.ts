@@ -1,3 +1,5 @@
+import { ageFlags } from "@/lib/ageChecks";
+import { ageGroup } from "@/lib/ages";
 import { findFlags, normalizeIngredient, overallStatus } from "@/lib/checks";
 import { getLabel } from "@/lib/fda";
 import {
@@ -77,6 +79,7 @@ export async function POST(req: Request) {
     const files = [...(form?.getAll("image") ?? []), ...(form?.getAll("images") ?? [])].filter(
       (f): f is File => f instanceof File && f.size > 0,
     );
+    const age = ageGroup(form?.get("age") ?? new URL(req.url).searchParams.get("age"));
     if (files.length > MAX_IMAGES) {
       return Response.json({ error: `Up to ${MAX_IMAGES} photos per scan.` }, { status: 400 });
     }
@@ -152,8 +155,10 @@ export async function POST(req: Request) {
     const missing = labelList.filter((l) => !l.found).map((l) => l.ingredient);
     if (missing.length) notes.push(`No openFDA label found for: ${missing.join(", ")}.`);
 
-    // 3. Deterministic checks.
+    // 3. Deterministic checks: product overlaps, then the age profile.
     const flags = findFlags(withKeys);
+    const ageCheck = await ageFlags(withKeys, age, labels);
+    notes.push(...ageCheck.notes);
 
     // 4. Plain-English explanations grounded in label text.
     let explained: Record<string, { explanation: string; citations: string[] }> = {};
@@ -174,6 +179,8 @@ export async function POST(req: Request) {
       f.explanation = e.explanation;
       f.citations = e.citations;
     }
+    // Age flags already carry a label-quoting explanation; they go first.
+    flags.unshift(...ageCheck.flags);
 
     const lowConfidence = withKeys.some((p) => p.confidence < 0.6);
     if (lowConfidence) notes.push("Some boxes were read with low confidence. Double-check the ingredients.");
@@ -181,6 +188,7 @@ export async function POST(req: Request) {
 
     const result: ScanResult = {
       mock,
+      age: age.id,
       model: mock ? `${MODEL} (mock)` : MODEL,
       status: overallStatus(flags, uncertain),
       products: withKeys,

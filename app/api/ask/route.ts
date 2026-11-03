@@ -1,3 +1,4 @@
+import { ageGroup, isUnder12 } from "@/lib/ages";
 import { dosingFor } from "@/lib/dosing";
 import { getLabel, labelCitation } from "@/lib/fda";
 import { BAD_KEY_HELP, BadKeyError, chat, hasKey, type Msg } from "@/lib/grok";
@@ -10,6 +11,7 @@ type Body = {
   products?: (Product & { keys: string[] })[];
   history?: { role: "user" | "assistant"; content: string }[];
   mock?: boolean;
+  age?: string;
 };
 
 const REDIRECT =
@@ -94,7 +96,10 @@ export async function POST(req: Request) {
     return Response.json({ answer: retrieve(question, chunks, names), grounded: true, by: mock ? "mock" : "rules" });
   }
 
+  const age = ageGroup(body.age);
   const context = [
+    `AGE PROFILE: the person taking these is ${age.label}.`,
+    "",
     "SCANNED PRODUCTS:",
     ...products.map((p) => `- ${p.brand}: ${p.active_ingredients.map((a) => `${a.name} ${a.strength}`).join(", ")}`),
     "",
@@ -109,8 +114,12 @@ export async function POST(req: Request) {
   const system = `You are Nomi, a careful assistant that answers questions about the user's scanned OTC medications.
 Answer ONLY using the SCANNED PRODUCTS and LABEL TEXT below. Do not use outside knowledge.
 - If the label text does not answer the question, or the question is about anything else (other drugs,
-  diagnosis, symptoms, dosing for children, medical conditions not on the label), reply exactly:
+  diagnosis, symptoms, children's doses the label does not state, medical conditions not on the label), reply exactly:
   "${REDIRECT}"
+- Use the AGE PROFILE. If the label says "do not use" or "ask a doctor" for that age (for example
+  "children under 12 years: do not use", or the Reye's syndrome warning for children and teenagers), say so first.${
+    !isUnder12(age) ? "" : "\n- Do not apply adult directions to a child; adult directions are for ages 12 and over."
+  }
 - Never invent doses, numbers, or risks. Quote or paraphrase the label closely.
 - Keep it to 2-4 short sentences in plain English and end with the source label name in parentheses.
 - This is not medical advice.

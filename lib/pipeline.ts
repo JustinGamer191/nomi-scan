@@ -1,5 +1,7 @@
 // Shared check pipeline for Live mode: merge sightings, fetch labels, run the
 // deterministic checks, and attach label-grounded explanations.
+import { ageFlags } from "./ageChecks";
+import type { AgeGroup } from "./ages";
 import { findFlags, normalizeIngredient, overallStatus } from "./checks";
 import { getLabel } from "./fda";
 import { templateExplanation } from "./grok";
@@ -33,13 +35,15 @@ export function mergeSeen(seen: SeenProduct[], incoming: Product[], max = 5) {
   return { products: [...map.values()], added };
 }
 
-export async function analyze(products: SeenProduct[]) {
+export async function analyze(products: SeenProduct[], age: AgeGroup) {
   const unique = [...new Set(products.flatMap((p) => p.keys))];
   const labelList = await Promise.all(unique.map((i) => getLabel(i)));
   const labels: Record<string, LabelInfo> = Object.fromEntries(labelList.map((l) => [l.ingredient, l]));
   const flags: Flag[] = findFlags(products);
   // Live mode uses the deterministic, quote-the-label explanation: instant and grounded.
   for (const f of flags) Object.assign(f, templateExplanation(f, labels));
+  // Age flags come with their own label-quoting explanation.
+  flags.push(...(await ageFlags(products, age, labels)).flags);
   const uncertain = products.some((p) => p.confidence < 0.6) || labelList.some((l) => !l.found);
   return {
     labels,
